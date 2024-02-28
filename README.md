@@ -1,25 +1,77 @@
-# MT7668 WiFi & Bluetooth Drivers for Linux
-WiFi &amp; Bluetooth Drivers for MT7668, found on certain models (Baikal, Belize) of PS4 Pro (7215/6) and some Android boxes. This repository along with the tutorial for building will help you setup and use WiFi and Bluetooth on your device with the MT7668 chipset. This code has been confirmed working with kernel 5.4.213 on PS4 (Baikal). But, this should work without further modifications on other 5.4.x kernels, though 5.15.x kernels for PS4 might require some change.
+在S905X3机顶盒 A95XF3编译通过，Armbian内核5.10，安装的O大的https://github.com/ophub/amlogic-s9xxx-armbian/releases
 
-## Disclaimer
-This is based on already existing work. Proper credits for the same have already been provided at the bottom of this page.
 
-## How to build WiFi and Bluetooth drivers for MT7668?
-This is a concise tutorial. For a detailed tutorial, visit my [detailed article](https://ps4linux.com/mt7668-wifi-bluetooth-drivers-linux-compile/).
+WIFI可用，蓝牙未测试。
 
-1. Build kernel-headers and image files with original kernel source. Leave `CONFIG_LOCALVERSION` empty.
-2. Install them on your development distro.
-3. Clone this git - `git clone https://github.com/noob404yt/mt7668-wifi-bt`.
-4. Open the file - *MT7668-WiFi/Makefile.x86* and replace `kernel_version` with the corresponding folder's name, eg.- `5.4.213+`. Similarly, edit *MT7668-Bluetooth/Makefile*.
-5. Open a terminal in the folder *MT7668-WiFi* and run `make EXTRA_CFLAGS="-w" CROSS_COMPILE= -f Makefile.x86`. Once complete, find the module - *wlan_mt76x8.ko* in *MT7668-WiFi/drv_wlan/MT6332/wlan*.
-6. Open a terminal in the folder *MT7668-Bluetooth* and run `make`. Once complete, find the module - *bt_mt7668.ko* in *MT7668-Bluetooth*.
-7. On the target system, copy everything in the folder *MT7668-WiFi/7668_firmware* to */usr/lib/firmware*. Them, install the kernel-headers and image. Load the module as you wish on your target system.
+参考：
+https://github.com/ophub/amlogic-s9xxx-armbian/issues/1043
+https://github.com/ophub/amlogic-s9xxx-armbian/issues/1701
 
-## Future of the project
-This repo may be used to build driver modules. But, with a little more work, I believe this can be incorporated within the kernel, to load as a driver automatically than a module. I haven't had the time to look into it. But, with many other devs in the PS4 scene looking into it already, I am sure something along the lines is close. 
+1.需要下载arm版本编译的内核，因为交叉编译的内核linux-headers是x86的，在编译时有类似错误：
+/bin/sh: 1: scripts/basic/fixdep: Exec format error
 
-## Thanks to
-1. *novice4321* (Sponsored the driver port to PS4)
-2. *Reo Au In* (Helped in testing and has helped sponsor projects from the beginning)
-3. [Khadas's Repo](https://github.com/khadas/android_hardware_wifi_mtk_drivers_mt7668/tree/Nougat)
-4. Many others (will update as and when I remember)
+下载arm环境下编译的内核，在ophub kernel项目的releases下载的kernel_dev下面有，如：
+wget https://github.com/ophub/kernel/releases/download/kernel_dev/5.10.209.tar.gz
+如果你已经是当前最新的，可以下载上一个版本的，如208。
+
+armbian-kernel -u
+tar xzvf 5.10.209.tar.gz
+cd 5.10.209
+armbian-update
+
+验证是arm编译的内核
+执行/usr/src/linux-headers-5.10.209-ophub/scripts/basic/fixdep
+
+
+2.对齐gcc
+查看gcc版本
+root@armbian:~/mt7668-ce/MT7668-WiFi# cat /proc/version
+Linux version 5.10.209-ophub (root@armbian) (aarch64-none-elf-gcc (Arm GNU Toolchain 13.2.rel1 (Build arm-13.7)) 13.2.1 20231009, GNU ld (Arm GNU Toolchain 13.2.rel1 (Build arm-13.7)) 2.41.0.20231009) #1 SMP PREEMPT Fri Jan 26 11:31:50 CST 2024
+
+下载对应版本的gcc
+wget https://armkeil.blob.core.windows.net/developer/Files/downloads/gnu/12.2.rel1/binrel/arm-gnu-toolchain-12.2.rel1-aarch64-aarch64-none-elf.tar.xz
+mkdir /opt/gcc-aarch64-none-elf
+sudo tar xf arm-gnu-toolchain-12.2.rel1-aarch64-aarch64-none-elf.tar.xz --strip-components=1 -C /opt/gcc-aarch64-none-elf
+echo 'export PATH=$PATH:/opt/gcc-aarch64-none-elf/bin' | sudo tee -a /etc/profile.d/gcc-aarch64-none-elf.sh
+source /etc/profile
+ln -sf /opt/gcc-aarch64-none-elf/bin/aarch64-none-elf-gcc /usr/local/bin/gcc
+
+
+
+3.编译mt7688
+git clone -b 5.15 https://github.com/fujianzz/mt7668-ce.git
+cd MT7668
+nano Makefile.x86
+#第3行 ,  第28行的x86改成arm64
+修改src路径为linux-header src路径
+![image](https://github.com/fujianzz/mt7668-armbian/assets/25293511/91626455-36c0-4337-9b05-dcbc550d2d99)
+
+
+make  EXTRA_CFLAGS="-w" CROSS_COMPILE= -f Makefile.x86 -j4
+
+
+4.挂载内核
+cp /root/mt7668-ce/MT7668-WiFi/7668_firmware/* /usr/lib/firmware/
+
+cd /root/mt7668-ce/MT7668-WiFi/drv_wlan/MT6632/wlan
+
+modprobe cfg80211
+insmod wlan_mt76x8_sdio.ko
+
+mkdir /lib/modules/5.10.209-ophub/kernel/drivers/wifi
+install -m 644 wlan_mt76x8_sdio.ko /lib/modules/5.10.209-ophub/kernel/drivers/wifi/
+
+添加到/etc/modules
+root@armbian:~# cat /etc/modules
+cfg80211
+wlan_mt76x8_sdio
+
+depmod -a
+
+
+5.加载这个驱动后，会导致有线掉IP，需要配置
+nano /etc/NetworkManager/system-connections/Wired\ connection\ 1.nmconnection
+[ethernet]下添加
+duplex=full
+speed=100
+![image](https://github.com/fujianzz/mt7668-armbian/assets/25293511/6ff3311a-2e37-495c-a377-6a4e03d137fc)
